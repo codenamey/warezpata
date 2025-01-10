@@ -1,0 +1,239 @@
+services:
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel  run --token eyJhIjoiMTY3YWZmZTk0M2U4NWUzZDY1NGE2YmFkMGY4ZDdiN2UiLCJ0IjoiMmQ1MDM1ODMtYzliMi00NmU0LTliODItMTJmMmQ2YWU2OTljIiwicyI6IllqWTJabVptTjJJdE1XVTBPUzAwWldSakxXRTVaR0V0TkdRek5HRmtaamhqTURnMyJ9
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    ports:
+      - "5000:3000"
+    volumes:
+      - ./data/homepage/config:/app/config  
+
+  unpackerr:
+    image: golift/unpackerr
+    container_name: unpackerr
+    volumes:
+      - /warezpata/downloads:/downloads
+      - /warezpata/complete:/complete
+    restart: always
+    user: 1000:1000
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - UN_LOG_FILE=/downloads/unpackerr.log
+      - UN_SONARR_0_URL=http://sonarr:8989
+      - UN_SONARR_0_API_KEY=8fc5cb10cf1f4277bf06c4990c7e3135
+      - UN_RADARR_0_URL=http://radarr:7878
+      - UN_RADARR_0_API_KEY=5d9a816a147342c1ba6cdfa794b02600
+
+
+# file download stack 
+  radarr:
+    container_name: radarr
+    image: linuxserver/radarr:latest
+    restart: unless-stopped
+    ports:
+      - "5002:7878"
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /warezpata/config/radarr:/config
+      - /warezpata/complete/movies:/movies 
+      - /warezpata/downloads:/downloads 
+
+  plex-server:
+    container_name: plex-server
+    image: plexinc/pms-docker:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ} 
+    volumes:
+      - /warezpata/config/plex/db:/config
+      - /warezpata/config/plex/transcode:/transcode
+      - /warezpata/complete:/data
+
+  sonarr:
+    container_name: sonarr
+    image: linuxserver/sonarr:latest
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports:
+      - "8989:8989"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /warezpata/config/sonarr:/config
+      - /warezpata/complete/tv:/tv
+
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    network_mode: "service:gluetun"
+    volumes:
+      - /warezpata/sabnzbd/config:/config
+      - /warezpata/downloads:/downloads
+      - /warezpata/complete:/complete
+      - /warezpata/incomplete/downloads:/incomplete-downloads
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - /warezpata/config/bazarr:/config
+      - /warezpata/complete:/media
+    ports:
+      - 6767:6767
+    restart: unless-stopped
+
+  gluetun:
+    image: qmcgaw/gluetun
+    ports:
+    - "5001:8080"
+    - "5881:5881"
+    - "6881:6881"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - WIREGUARD_ENDPOINT_IP=130.195.221.162
+      - WIREGUARD_ENDPOINT_PORT=51820
+      - WIREGUARD_PUBLIC_KEY=N3IkjWjh9PFh3Wo0srltI6X8pm9EJbc3hTu0sFfxSwE=
+      - WIREGUARD_PRIVATE_KEY=sLLFVWXMO8SEst+kQYYG5uoG6vLB8bb4y5ZmDMv6v1Q=
+      - WIREGUARD_ADDRESSES=10.2.0.2/32
+
+
+#monitoring setup starts here by lennart.takanen@gmail.com
+
+
+  prometheus:
+    image: prom/prometheus:v2.37.9
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./data:/prometheus
+    restart: unless-stopped
+
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - '9000:3000'
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:v1.5.0
+    container_name: node_exporter
+    command: '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
+    command:
+      - '-port=9098'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    restart: unless-stopped
+
+
+
+  website-mariadb:
+    image: 'mariadb:latest'
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: '2016!LennartTakanen'
+    volumes:
+      - ./data/mariadb:/var/lib/mysql
+    ports:
+      - '3307:3306'
+
+  nordicfitnessexpocom:
+    image: wordpress
+    container_name: nordicfitnessexpocom
+    restart: always
+    ports:
+      - 3001:80
+    environment:
+      WORDPRESS_DB_HOST: website-mariadb
+      WORDPRESS_DB_PORT: 3307
+      WORDPRESS_DB_USER: nordicfitnessexpocom
+      WORDPRESS_DB_PASSWORD: TBPnsQJ8PPzxH
+      WORDPRESS_DB_NAME: nordicfitnessexpocom
+    volumes:
+      - ./sites/nordicfitnessexpo.com:/var/www/html
+      - ./etc/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+
+  minigolfscorefi:
+    image: httpd:latest
+    container_name: minigolfscorefi
+    restart: always
+    ports:
+      - 4000:80
+    volumes:
+    - ./sites/newfront.minigolfscore.fi:/usr/local/apache2/htdocs
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=${PUID}
+      - PGID=${PUID}
+      - TZ=Etc/UTC
+      - WEBUI_PORT=5881
+      - TORRENTING_PORT=6881
+    network_mode: "service:gluetun"
+    volumes:
+      - /srv/management/qbittorrent/appdata:/config
+      - /warezpata/torrents:/downloads #optional
+    restart: unless-stopped
+
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge
+
